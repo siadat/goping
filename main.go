@@ -1,19 +1,15 @@
 package main
 
 import (
-	"github.com/docopt/docopt-go"
-	"github.com/fatih/color"
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
+	"flag"
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"time"
-)
 
-var (
-	interval time.Duration = 1 * time.Second
+	"github.com/fatih/color"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -42,15 +38,19 @@ func newMsg(seq int) (msg icmp.Message) {
 func marshalMsg(msg icmp.Message) (buff []byte) {
 	buff, err := msg.Marshal(nil)
 	if err != nil {
-		log.Fatalln("FATAL:Marshal", err)
+		log.Fatal("Marshal", err)
 	}
 	return
 }
 
 func start(ip string, count int, interval time.Duration, iface string) {
+	for counter := 1; !shouldStop(counter-1, count, interval); counter++ {
+		c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+		if err != nil {
+			log.Fatal("ListenPacket", err)
+		}
+		c.SetDeadline(time.Now().Add(10 * time.Second))
 
-	for counter := 1; !shouldEnd(counter-1, count); counter++ {
-		c := newConn()
 		msg := newMsg(counter)
 		writeBuff := marshalMsg(msg)
 
@@ -75,7 +75,7 @@ func start(ip string, count int, interval time.Duration, iface string) {
 
 		rm, err := icmp.ParseMessage(ProtocolICMP, readBuff[:n])
 		if err != nil {
-			log.Fatalln("FATAL:ParseMessage", err)
+			log.Fatal("ParseMessage", err)
 		}
 
 		switch rm.Type {
@@ -90,13 +90,13 @@ func start(ip string, count int, interval time.Duration, iface string) {
 	}
 }
 
-func shouldEnd(counter, max int) bool {
+func shouldStop(counter, max int, interval time.Duration) bool {
 	shouldSleep := true
 	if counter == 0 {
 		shouldSleep = false
 	}
 
-	if max == -1 {
+	if max == 0 {
 		if shouldSleep {
 			time.Sleep(interval)
 		}
@@ -111,33 +111,11 @@ func shouldEnd(counter, max int) bool {
 	return false
 }
 
-func newConn() (c *icmp.PacketConn) {
-	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	c.SetDeadline(time.Now().Add(10 * time.Second))
-	if err != nil {
-		log.Fatalln("FATAL:ListenPacket", err)
-	}
-	return
-}
-
 func main() {
-	args, err := docopt.Parse(usage, nil, true, "0.0.0", false, true)
-	ip := args["<ip>"].(string)
+	interval := flag.Duration("i", time.Second, "Set sleep time duration")
+	count := flag.Int("c", 0, "Limit number of requests")
+	flag.Parse()
+	ip := flag.Arg(0)
 	iface := "en0"
-	count := -1
-	if args["-i"] != nil {
-		sec, err := strconv.ParseFloat(args["-i"].(string), 64)
-		if err != nil || sec < 0 {
-			log.Fatalln("-i should be a float >= 0", err)
-		}
-		interval = time.Duration(sec*1000) * time.Millisecond
-	}
-
-	if args["-c"] != nil {
-		count, err = strconv.Atoi(args["-c"].(string))
-		if err != nil || count < 1 {
-			log.Fatalln("-c value should be >= 1", err)
-		}
-	}
-	start(ip, count, interval, iface)
+	start(ip, *count, *interval, iface)
 }
